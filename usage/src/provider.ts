@@ -12,13 +12,21 @@
  *                           them) and reflect the live per-window limits applied
  *                           to your current API key.
  *
- * API keys are resolved with pi's own resolver — `AuthStorage.getApiKey()` —
- * which checks `~/.pi/agent/auth.json` FIRST (api_key via resolveConfigValue,
- * or OAuth with refresh), then env vars, then custom-provider fallback. This
- * matches pi's built-in auth exactly, so keys stored via `/login` or
- * `pi config` (which land in auth.json) resolve correctly, not just env vars.
+ * API keys are resolved via Pi's public `readStoredCredential()` — which reads
+ * `~/.pi/agent/auth.json` (api_key credentials and OAuth access tokens stored
+ * by `/login` or `pi config`) — falling back to env vars. Note: this is a
+ * passive read; it does not refresh OAuth tokens. A stale token surfaces as a
+ * 401 from the quota endpoint with an actionable "re-authenticate" note.
+ *
+ * Do NOT import the private `AuthStorage` class from the package root: Pi
+ * 0.87.x does not export it, which crashed quota refresh with
+ * "Cannot read properties of undefined (reading 'create')".
  */
-import { type Api, getEnvApiKey, type Model } from "@earendil-works/pi-ai";
+import { type Api, type Model } from "@earendil-works/pi-ai";
+// getEnvApiKey is only exported from the compat entry: the pi-ai 0.87.x root
+// (".") does not export it, and Pi's jiti loader would silently bind it to
+// undefined, breaking the env-var fallback at runtime.
+import { getEnvApiKey } from "@earendil-works/pi-ai/compat";
 import { readStoredCredential } from "@earendil-works/pi-coding-agent";
 import {
 	credentialToAccountId,
@@ -496,11 +504,12 @@ interface CodexUsage {
 
 /**
  * Fetch OpenAI Codex subscription quota from the REST endpoint
- * (https://chatgpt.com/backend-api/wham/usage). Uses pi's OWN AuthStorage —
- * the SAME credentials pi uses to authenticate with Codex — so the token is
- * always fresh (pi auto-refreshes OAuth). Reading ~/.codex/auth.json (the
- * Codex CLI's file) was wrong: that file is frequently stale/rotated while
- * pi keeps its own copy current.
+ * (https://chatgpt.com/backend-api/wham/usage). Reads pi's OWN credential
+ * store (auth.json) via the public `readStoredCredential()` — the same store
+ * pi authenticates Codex with — instead of ~/.codex/auth.json (the Codex CLI's
+ * file), which is frequently stale/rotated while pi keeps its own copy
+ * current. The stored token is read passively; an expired token yields a 401
+ * with a clear re-authentication hint rather than a crash.
  *
  * The `x-codex-*` header path is also unreliable: pi's codex provider uses a
  * WebSocket for streaming and does NOT surface response headers to the
@@ -515,7 +524,7 @@ export async function fetchCodexQuota(
 	| { quota: undefined; error: string }
 	| undefined
 > {
-	// Resolve the access token via pi's AuthStorage (handles OAuth refresh).
+	// Resolve the OAuth access token from pi's credential store (or env).
 	const accessToken = await resolveApiKey(provider);
 	if (!accessToken) {
 		return {
