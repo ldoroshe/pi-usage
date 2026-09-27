@@ -19,46 +19,29 @@
  * `pi config` (which land in auth.json) resolve correctly, not just env vars.
  */
 import { type Api, getEnvApiKey, type Model } from "@earendil-works/pi-ai";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { readStoredCredential } from "@earendil-works/pi-coding-agent";
+import {
+	credentialToAccountId,
+	credentialToApiKey,
+	hasCredentialAuth,
+} from "./auth.ts";
 import { classifyZaiLimits, type ZaiQuotaLimit } from "./zai.ts";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
 /**
- * Cached AuthStorage — pi's credential store at ~/.pi/agent/auth.json.
- *
- * `AuthStorage.getApiKey()` is the SAME resolver pi uses at request time: it
- * checks auth.json (api_key via `resolveConfigValue`, or OAuth with refresh)
- * before falling back to env vars. Using it here makes key detection match pi's
- * built-in auth exactly — so keys stored via `/login` or `pi config` (which
- * land in auth.json, not the environment) resolve correctly.
- */
-let authStore: AuthStorage | null = null;
-function getAuthStore(): AuthStorage {
-	if (!authStore) {
-		authStore = AuthStorage.create();
-	}
-	return authStore;
-}
-
-/**
- * Resolve a provider's API key the way pi does: auth.json first (api_key/OAuth),
- * then env var, then custom-provider fallback. Returns undefined if unconfigured.
+ * Resolve a provider's API key using Pi's public credential reader first, then
+ * env vars. Avoid private AuthStorage APIs: Pi 0.87.x does not export
+ * AuthStorage from the package root, so importing it makes refresh fail with
+ * "Cannot read properties of undefined (reading 'create')".
  */
 export async function resolveApiKey(
 	provider: string,
 ): Promise<string | undefined> {
 	if (!provider) return undefined;
-	try {
-		return await getAuthStore().getApiKey(provider, { includeFallback: true });
-	} catch (err) {
-		// Resolution failure (e.g. transient OAuth refresh error) → fall back to env.
-		console.error(
-			`[usage] getApiKey(${provider}) failed: ${err instanceof Error ? err.message : String(err)}`,
-		);
-		return getEnvApiKey(provider);
-	}
+	const storedKey = credentialToApiKey(readStoredCredential(provider));
+	return storedKey ?? getEnvApiKey(provider);
 }
 
 /**
@@ -67,11 +50,7 @@ export async function resolveApiKey(
  */
 export function hasProviderKey(provider: string): boolean {
 	if (!provider) return false;
-	try {
-		return getAuthStore().hasAuth(provider);
-	} catch {
-		return !!getEnvApiKey(provider);
-	}
+	return hasCredentialAuth(readStoredCredential(provider)) || !!getEnvApiKey(provider);
 }
 
 export interface ActiveProvider {
@@ -545,17 +524,8 @@ export async function fetchCodexQuota(
 		};
 	}
 
-	// The /wham/usage endpoint needs the ChatGPT account id. Read it from pi's
-	// OAuth credential (stored as `accountId` on the OAuthCredential).
-	let accountId: string | undefined;
-	try {
-		const cred = getAuthStore().get(provider);
-		if (cred && cred.type === "oauth") {
-			accountId = (cred as { accountId?: string }).accountId;
-		}
-	} catch {
-		// accountId is optional for the REST call; ignore errors.
-	}
+	// The /wham/usage endpoint needs the ChatGPT account id when available.
+	const accountId = credentialToAccountId(readStoredCredential(provider));
 
 	// Fetch the quota.
 	const headers: Record<string, string> = {

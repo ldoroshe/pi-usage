@@ -1,17 +1,25 @@
 {
-	"name": "pi-extension-monorepo",
+	"name": "pi-usage",
 	"private": true,
-	"description": "Extensions for the pi coding agent: pi-usage, pi-multi-skill, and pi-context.",
+	"description": "Fork of pi-usage extension for the pi coding agent.",
+	"keywords": [
+		"pi-package"
+	],
 	"license": "MIT",
 	"author": "ZaganJade <tipstrik81@gmail.com>",
-	"homepage": "https://github.com/ZaganJade/pi-extension",
+	"homepage": "https://github.com/ldoroshe/pi-usage",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/ZaganJade/pi-extension.git"
+		"url": "git+https://github.com/ldoroshe/pi-usage.git"
 	},
 	"workspaces": [
 		"usage",
 		"multi-skill",
 		"Pi-Context"
-	]
+	],
+	"pi": {
+		"extensions": [
+			"./usage/src/index.ts"
+		]
+	}
 }
